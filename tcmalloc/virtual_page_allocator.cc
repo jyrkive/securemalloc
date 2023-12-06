@@ -8,6 +8,16 @@
 namespace tcmalloc::tcmalloc_internal {
 
 namespace {
+  /* Crashes the process if all four million allowed simultaneous allocations are
+  already in use. Memory allocation isn't possible in this situation, and the
+  process would be unlikely to recover if malloc started returning null irrespective
+  of requested allocation sizes. */
+  void CrashIfNoFreePagesLeft(std::uint64_t bufferused) {
+    if (bufferused >> 32 == 0) {
+      std::terminate();
+    }
+  }
+
   std::uint64_t MarkPageAllocated(std::uint64_t old_bufferused) {
     // Subtract 1 from the upper half (the number of free pages) and
     // add 1 to the lower half (the index of the first free page), and
@@ -36,18 +46,13 @@ VirtualPageAllocator::VirtualPageAllocator() :
 
 char* VirtualPageAllocator::Allocate() {
   std::uint64_t bufferused = page_bufferused_.load(std::memory_order_relaxed);
-
-  if (bufferused >> 32 == 0) {
-    // There are no free pages left. All four million allowed simultaneous
-    // allocations are in use. Let's just crash.
-    std::terminate();
-  }
+  CrashIfNoFreePagesLeft(bufferused);
 
   // Here's the magic: atomically mark the first free page as allocated.
   // Keep going until the read-modify-write operation succeeds.
   while (!page_bufferused_.compare_exchange_weak(bufferused,
     MarkPageAllocated(bufferused), std::memory_order_relaxed)) {
-
+      CrashIfNoFreePagesLeft(bufferused);
     }
 
   // At this point, the "first free page" in the old bufferused has been marked

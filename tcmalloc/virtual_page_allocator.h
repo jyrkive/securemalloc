@@ -26,9 +26,10 @@ class VirtualPageAllocator {
     /* A ring buffer that stores indices of all free pages.
     page_bufferused_ stores the necessary information to determine which parts
     of the ring buffer are in use.
-    The bottom 24 bits are the actual index: the top 8 bits are reserved for
-    future expansion. */
-    std::uint32_t* free_page_buffer_;
+    The bottom 24 bits are the actual index: the top 8 bits are used for flags.
+    Bit 31: allocated
+    Bits 24-30: (reserved for future expansion) */
+    std::atomic<std::uint32_t>* free_page_buffer_;
 
     /* Stores the first used index (bottom 32 bits) and number of used elements
     (top 32 bits) in free_page_buffer_. The information is packed into a single

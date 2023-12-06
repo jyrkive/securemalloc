@@ -8,7 +8,7 @@
 namespace tcmalloc::tcmalloc_internal {
 
 namespace {
-  /* Crashes the process if all four million allowed simultaneous allocations are
+  /* Crashes the process if all 16 million allowed simultaneous allocations are
   already in use. Memory allocation isn't possible in this situation, and the
   process would be unlikely to recover if malloc started returning null irrespective
   of requested allocation sizes. */
@@ -23,11 +23,11 @@ namespace {
     // add 1 to the lower half (the index of the first free page), and
     // mask the lower half in case of an overflow.
     return (old_bufferused - 0x100000000 & 0xFFFFFFFF00000000) |
-      ((old_bufferused + 1) & 0x003FFFFF);
+      ((old_bufferused + 1) & 0x00FFFFFF);
   }
 
   static const std::ptrdiff_t page_size = 4096;
-  static constexpr std::uint32_t num_buffer_slots = 4 << 20;
+  static constexpr std::uint32_t num_buffer_slots = 1 << 24;
   static constexpr std::uint32_t flag_allocated = static_cast<std::uint32_t>(1) << 31;
 }
 
@@ -101,7 +101,7 @@ void VirtualPageAllocator::Free(char* page) {
   /* We get the index of the first free slot by adding the first used index
   (bottom 32 bits) and the number of used elements (top 32 bits). Masking isn't used:
   this calculation would give a wrong answer without masking if it overflowed, but it
-  cannot, because the buffer is restricted to four million elements, well below the
+  cannot, because the buffer is restricted to 16 million elements, well below the
   limit for unsigned 32-bit numbers. Hence, omitting masking is safe. */
   auto buffer_index = (bufferused << 32 + bufferused) % num_buffer_slots;
 

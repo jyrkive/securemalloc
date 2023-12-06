@@ -1,5 +1,7 @@
 #include "tcmalloc/virtual_page_allocator.h"
 
+#define _GNU_SOURCE
+
 #include <cstddef>
 #include <sys/mman.h>
 
@@ -17,6 +19,19 @@ namespace {
   static const std::ptrdiff_t page_size = 4096;
   static constexpr std::uint32_t num_buffer_slots = 4 << 20;
   static constexpr std::uint32_t flag_allocated = static_cast<std::uint32_t>(1) << 31;
+}
+
+VirtualPageAllocator::VirtualPageAllocator() :
+  page_bufferused_(static_cast<std::uint64_t>(num_buffer_slots) << 32) {
+  pages_ = mmap(nullptr, static_cast<size_t>(64) << 30, PROT_NONE,
+    MAP_SHARED | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+  free_page_buffer_ = mmap(nullptr,
+    num_buffer_slots * sizeof(std::atomic<std::uint32_t>), PROT_READ | PROT_WRITE,
+    MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+
+  for (std::uint32_t i = 0; i < num_buffer_slots; ++i) {
+    new (free_page_buffer_ + i) std::atomic<std::uint32_t>(i);
+  }
 }
 
 char* VirtualPageAllocator::Allocate() {

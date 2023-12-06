@@ -6,3 +6,5 @@
   return the address in the virtual page instead of the original page
 * consider removing said alias when free() is called (and when realloc() needs to
   switch to a different physical page)
+* how slow is generating the free list on init? If necessary, consider generating it
+  lazily

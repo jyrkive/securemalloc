@@ -45,4 +45,19 @@ char* VirtualPageAllocator::Allocate() {
   return page;
 }
 
+void VirtualPageAllocator::Free(char* page) {
+  // Mark the memory as inaccessible.
+  mprotect(page, page_size, PROT_NONE);
+
+  std::uint32_t page_index = (page - pages_) / page_size;
+
+  std::uint64_t bufferused = page_bufferused_.load(std::memory_order_relaxed);
+
+  // Write the page index into the ring buffer.
+  free_page_buffer_[bufferused & 0xFFFFFFFF] = page_index;
+
+  // Atomically increase the number of free pages by 1.
+  page_bufferused_.fetch_add(0x100000000, std::memory_order_release);
+}
+
 }

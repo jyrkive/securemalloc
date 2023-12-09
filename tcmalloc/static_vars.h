@@ -240,10 +240,14 @@ inline void Static::InitIfNecessary() {
 // includes static_vars.h, this is a perfectly good compromise.
 // TODO(b/134687001): move span_allocator to Span, getting rid of the need for
 // this.
-inline Span* Span::New(PageId p, Length len) {
+inline Span* Span::New(int fd, PageId p, Length len) {
   Span* result = Static::span_allocator().New();
-  result->Init(p, len);
+  result->Init(fd, p, len);
   return result;
+}
+
+inline Span* Span::New(const Span* parent, PageId p, Length len) {
+  return Span::New(parent->file_descriptor(), p, len);
 }
 
 inline void Span::Delete(Span* span) {

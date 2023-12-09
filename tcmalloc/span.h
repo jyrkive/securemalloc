@@ -89,7 +89,9 @@ class Span : public SpanList::Elem {
  public:
   // Allocator/deallocator for spans. Note that these functions are defined
   // in static_vars.h, which is weird: see there for why.
-  static Span* New(PageId p, Length len)
+  static Span* New(int fd, PageId p, Length len)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock);
+  static Span* New(const Span* parent, PageId p, Length len)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock);
   static void Delete(Span* span) ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock);
 
@@ -136,6 +138,9 @@ class Span : public SpanList::Elem {
   // ---------------------------------------------------------------------------
   // Span memory range.
   // ---------------------------------------------------------------------------
+
+  // Returns the file descriptor of the anonymous file backing the span.
+  int file_descriptor() const;
 
   // Returns first page of the span.
   PageId first_page() const;
@@ -231,7 +236,7 @@ class Span : public SpanList::Elem {
   size_t FreelistPopBatch(void** batch, size_t N, size_t size);
 
   // Reset a Span object to track the range [p, p + n).
-  void Init(PageId p, Length n);
+  void Init(int fd, PageId p, Length n);
 
   // Initialize freelist to contain all objects in the span.
   // Pops up to N objects from the freelist and returns them in the batch array.
@@ -314,8 +319,9 @@ class Span : public SpanList::Elem {
     uint64_t freelist_added_time_;
   };
 
-  PageId first_page_;  // Starting page number.
-  Length num_pages_;   // Number of pages in span.
+  int file_descriptor_; // File descriptor.
+  PageId first_page_;   // Starting page number.
+  Length num_pages_;    // Number of pages in span.
 
   // Convert object pointer <-> freelist index.
   ObjIdx PtrToIdx(void* ptr, size_t size) const;
@@ -575,6 +581,8 @@ inline SampledAllocation* Span::sampled_allocation() const {
 
 inline bool Span::sampled() const { return sampled_; }
 
+inline int Span::file_descriptor() const { return file_descriptor_; }
+
 inline PageId Span::first_page() const { return first_page_; }
 
 inline PageId Span::last_page() const {
@@ -625,13 +633,14 @@ inline void Span::Prefetch() {
   PrefetchT0(&this->allocated_);
 }
 
-inline void Span::Init(PageId p, Length n) {
+inline void Span::Init(int fd, PageId p, Length n) {
   ASSERT(p > PageId{0});
 #ifndef NDEBUG
   // In debug mode we have additional checking of our list ops; these must be
   // initialized.
   new (this) Span();
 #endif
+  file_descriptor_ = fd;
   first_page_ = p;
   num_pages_ = n;
   location_ = IN_USE;

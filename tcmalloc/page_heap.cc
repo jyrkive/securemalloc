@@ -169,14 +169,14 @@ Span* PageHeap::NewAligned(Length n, Length align,
     const Span::Location loc =
         from_returned ? Span::ON_RETURNED_FREELIST : Span::ON_NORMAL_FREELIST;
     if (before > Length(0)) {
-      Span* extra = Span::New(p, before);
+      Span* extra = Span::New(span, p, before);
       extra->set_location(loc);
       RecordSpan(extra);
       MergeIntoFreeList(extra);
     }
 
     if (after > Length(0)) {
-      Span* extra = Span::New(aligned + n, after);
+      Span* extra = Span::New(span, aligned + n, after);
       extra->set_location(loc);
       RecordSpan(extra);
       MergeIntoFreeList(extra);
@@ -247,11 +247,11 @@ Span* PageHeap::Carve(Span* span, Length n) {
     // so in other cases we return beginning to user.
     if (pagemap_->GetDescriptor(span->first_page() - Length(1)) == nullptr &&
         pagemap_->GetDescriptor(span->last_page() + Length(1)) != nullptr) {
-      leftover = Span::New(span->first_page(), extra);
+      leftover = Span::New(span, span->first_page(), extra);
       span->set_first_page(span->first_page() + extra);
       pagemap_->Set(span->first_page(), span);
     } else {
-      leftover = Span::New(span->first_page() + n, extra);
+      leftover = Span::New(span, span->first_page() + n, extra);
     }
     leftover->set_location(old_location);
     RecordSpan(leftover);
@@ -292,7 +292,8 @@ void PageHeap::MergeIntoFreeList(Span* span) {
   const PageId p = span->first_page();
   const Length n = span->num_pages();
   Span* prev = pagemap_->GetDescriptor(p - Length(1));
-  if (prev != nullptr && prev->location() == span->location()) {
+  if (prev != nullptr && prev->file_descriptor() == span->file_descriptor() &&
+      prev->location() == span->location()) {
     // Merge preceding span into this span
     ASSERT(prev->last_page() + Length(1) == p);
     const Length len = prev->num_pages();
@@ -304,7 +305,8 @@ void PageHeap::MergeIntoFreeList(Span* span) {
     pagemap_->Set(span->first_page(), span);
   }
   Span* next = pagemap_->GetDescriptor(p + n);
-  if (next != nullptr && next->location() == span->location()) {
+  if (next != nullptr && next->file_descriptor() == span->file_descriptor() &&
+      next->location() == span->location()) {
     // Merge next span into this span
     ASSERT(next->first_page() == p + n);
     const Length len = next->num_pages();
@@ -456,7 +458,7 @@ bool PageHeap::GrowHeap(Length n) {
   if (ABSL_PREDICT_TRUE(pagemap_->Ensure(p - Length(1), n + Length(2)))) {
     // Pretend the new area is allocated and then return it to cause
     // any necessary coalescing to occur.
-    Span* span = Span::New(p, n);
+    Span* span = Span::New(fd, p, n);
     RecordSpan(span);
     span->set_location(Span::ON_RETURNED_FREELIST);
     MergeIntoFreeList(span);

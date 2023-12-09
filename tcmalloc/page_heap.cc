@@ -438,7 +438,7 @@ void PageHeap::GetLargeSpanStats(LargeSpanStats* result) {
 
 bool PageHeap::GrowHeap(Length n) {
   if (n > Length::max()) return false;
-  auto [ptr, actual_size] = SystemAlloc(n.in_bytes(), kPageSize, tag_);
+  auto [fd, ptr, actual_size] = SystemAlloc(n.in_bytes(), kPageSize, tag_);
   if (ptr == nullptr) return false;
   n = BytesToLengthFloor(actual_size);
 

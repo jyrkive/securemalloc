@@ -186,15 +186,7 @@ create_tcmalloc_libraries(
         "guarded_page_allocator.h",
         "hinted_tracker_lists.h",
         "huge_address_map.cc",
-        "huge_allocator.cc",
-        "huge_allocator.h",
-        "huge_cache.cc",
-        "huge_cache.h",
-        "huge_page_aware_allocator.cc",
-        "huge_page_aware_allocator.h",
-        "huge_page_filler.h",
         "huge_pages.h",
-        "huge_region.h",
         "legacy_size_classes.cc",
         "page_allocator.cc",
         "page_allocator.h",
@@ -243,12 +235,7 @@ create_tcmalloc_libraries(
         "guarded_page_allocator.h",
         "hinted_tracker_lists.h",
         "huge_address_map.h",
-        "huge_allocator.h",
-        "huge_cache.h",
-        "huge_page_aware_allocator.h",
-        "huge_page_filler.h",
         "huge_pages.h",
-        "huge_region.h",
         "page_allocator.h",
         "page_allocator_interface.h",
         "page_heap.h",
@@ -500,39 +487,6 @@ cc_library(
 )
 
 cc_fuzz_test(
-    name = "huge_page_aware_allocator_fuzz",
-    testonly = 1,
-    srcs = ["huge_page_aware_allocator_fuzz.cc"],
-    copts = TCMALLOC_DEFAULT_COPTS,
-    deps = [
-        ":common_8k_pages",
-        ":mock_huge_page_static_forwarder",
-        "//tcmalloc/internal:allocation_guard",
-        "//tcmalloc/internal:logging",
-        "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/time",
-    ],
-)
-
-cc_fuzz_test(
-    name = "huge_page_filler_fuzz",
-    testonly = 1,
-    srcs = ["huge_page_filler_fuzz.cc"],
-    copts = TCMALLOC_DEFAULT_COPTS,
-    deps = [
-        ":common_8k_pages",
-        "//tcmalloc/internal:allocation_guard",
-        "//tcmalloc/internal:clock",
-        "//tcmalloc/internal:logging",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/container:flat_hash_set",
-        "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/time",
-    ],
-)
-
-cc_fuzz_test(
     name = "span_fuzz",
     testonly = 1,
     srcs = ["span_fuzz.cc"],
@@ -623,84 +577,6 @@ create_tcmalloc_benchmark(
         ":mock_transfer_cache",
         "@com_github_google_benchmark//:benchmark",
         "@com_google_absl//absl/types:optional",
-    ],
-)
-
-cc_test(
-    name = "huge_cache_test",
-    srcs = ["huge_cache_test.cc"],
-    copts = TCMALLOC_DEFAULT_COPTS,
-    deps = [
-        ":common_8k_pages",
-        ":mock_metadata_allocator",
-        ":mock_virtual_allocator",
-        "//tcmalloc/internal:clock",
-        "//tcmalloc/internal:config",
-        "//tcmalloc/internal:logging",
-        "@com_google_absl//absl/base",
-        "@com_google_absl//absl/memory",
-        "@com_google_absl//absl/random",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/time",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "huge_allocator_test",
-    srcs = ["huge_allocator_test.cc"],
-    copts = TCMALLOC_DEFAULT_COPTS,
-    deps = [
-        ":common_8k_pages",
-        ":mock_metadata_allocator",
-        ":mock_virtual_allocator",
-        "//tcmalloc/internal:config",
-        "//tcmalloc/internal:logging",
-        "@com_google_absl//absl/base",
-        "@com_google_absl//absl/random",
-        "@com_google_absl//absl/time",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "huge_page_filler_test",
-    timeout = "eternal",
-    srcs = ["huge_page_filler_test.cc"],
-    copts = TCMALLOC_DEFAULT_COPTS,
-    linkstatic = 1,
-    shard_count = 3,
-    deps = [
-        ":common_8k_pages",
-        "//tcmalloc/internal:clock",
-        "//tcmalloc/internal:config",
-        "//tcmalloc/internal:logging",
-        "@com_github_google_benchmark//:benchmark",
-        "@com_google_absl//absl/algorithm:container",
-        "@com_google_absl//absl/base",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/container:flat_hash_set",
-        "@com_google_absl//absl/flags:flag",
-        "@com_google_absl//absl/memory",
-        "@com_google_absl//absl/random",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/synchronization",
-        "@com_google_absl//absl/time",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
-    name = "huge_region_test",
-    srcs = ["huge_region_test.cc"],
-    copts = TCMALLOC_DEFAULT_COPTS,
-    deps = [
-        ":common_8k_pages",
-        "//tcmalloc/internal:logging",
-        "@com_google_absl//absl/memory",
-        "@com_google_absl//absl/random",
-        "@com_google_absl//absl/time",
-        "@com_google_googletest//:gtest_main",
     ],
 )
 

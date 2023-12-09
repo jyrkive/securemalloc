@@ -31,6 +31,7 @@
 #include <cstring>
 #include <limits>
 #include <optional>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -143,7 +144,7 @@ class MmapRegion final : public AddressRegion {
  public:
   MmapRegion(uintptr_t start, size_t size, AddressRegionFactory::UsageHint hint, int fd)
       : start_(start), free_size_(size), hint_(hint), fd_(fd) {}
-  std::pair<void*, size_t> Alloc(size_t size, size_t alignment) override
+  std::tuple<int, void*, size_t> Alloc(size_t size, size_t alignment) override
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(spinlock);
   ~MmapRegion() override = default;
   int GetFileDescriptor() override {return fd_;}
@@ -171,7 +172,7 @@ ABSL_CONST_INIT std::aligned_storage<sizeof(MmapRegionFactory),
 
 class RegionManager {
  public:
-  std::pair<void*, size_t> Alloc(size_t size, size_t alignment, MemoryTag tag)
+  std::tuple<int, void*, size_t> Alloc(size_t size, size_t alignment, MemoryTag tag)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(spinlock);
 
   void DiscardMappedRegions() ABSL_EXCLUSIVE_LOCKS_REQUIRED(spinlock) {
@@ -184,7 +185,7 @@ class RegionManager {
   // Checks that there is sufficient space available in the reserved region
   // for the next allocation, if not allocate a new region.
   // Then returns a pointer to the new memory.
-  std::pair<void*, size_t> Allocate(size_t size, size_t alignment,
+  std::tuple<int, void*, size_t> Allocate(size_t size, size_t alignment,
                                     MemoryTag tag)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(spinlock);
 
@@ -198,21 +199,21 @@ std::aligned_storage<sizeof(RegionManager), alignof(RegionManager)>::type
 ABSL_CONST_INIT RegionManager* region_manager ABSL_GUARDED_BY(spinlock) =
     nullptr;
 
-std::pair<void*, size_t> MmapRegion::Alloc(size_t request_size,
+std::tuple<int, void*, size_t> MmapRegion::Alloc(size_t request_size,
                                            size_t alignment) {
   // Align on kMinSystemAlloc boundaries to reduce external fragmentation for
   // future allocations.
   size_t size = RoundUp(request_size, kMinSystemAlloc);
-  if (size < request_size) return {nullptr, 0};
+  if (size < request_size) return {-1, nullptr, 0};
   alignment = std::max(alignment, preferred_alignment);
 
   // Tries to allocate size bytes from the end of [start_, start_ + free_size_),
   // aligned to alignment.
   uintptr_t end = start_ + free_size_;
   uintptr_t result = end - size;
-  if (result > end) return {nullptr, 0};  // Underflow.
+  if (result > end) return {-1, nullptr, 0};  // Underflow.
   result &= ~(alignment - 1);
-  if (result < start_) return {nullptr, 0};  // Out of memory in region.
+  if (result < start_) return {-1, nullptr, 0};  // Out of memory in region.
   size_t actual_size = end - result;
 
   ASSERT(result % GetPageSize() == 0);
@@ -221,7 +222,7 @@ std::pair<void*, size_t> MmapRegion::Alloc(size_t request_size,
     Log(kLogWithStack, __FILE__, __LINE__,
         "mprotect() region failed (ptr, size, error)", result_ptr, actual_size,
         strerror(errno));
-    return {nullptr, 0};
+    return {-1, nullptr, 0};
   }
   // For cold regions (kInfrequentAccess) and sampled regions
   // (kInfrequentAllocation), we want as granular of access telemetry as
@@ -233,7 +234,7 @@ std::pair<void*, size_t> MmapRegion::Alloc(size_t request_size,
     (void)madvise(result_ptr, actual_size, MADV_NOHUGEPAGE);
   }
   free_size_ -= actual_size;
-  return {result_ptr, actual_size};
+  return {fd_, result_ptr, actual_size};
 }
 
 AddressRegion* MmapRegionFactory::Create(AnonymousFile file, size_t size,
@@ -281,14 +282,14 @@ static AddressRegionFactory::UsageHint TagToHint(MemoryTag tag) {
   }
 }
 
-std::pair<void*, size_t> RegionManager::Alloc(size_t request_size,
+std::tuple<int, void*, size_t> RegionManager::Alloc(size_t request_size,
                                               size_t alignment,
                                               const MemoryTag tag) {
   constexpr uintptr_t kTagFree = uintptr_t{1} << kTagShift;
 
   // We do not support size or alignment larger than kTagFree.
   // TODO(b/141325493): Handle these large allocations.
-  if (request_size > kTagFree || alignment > kTagFree) return {nullptr, 0};
+  if (request_size > kTagFree || alignment > kTagFree) return {-1, nullptr, 0};
 
   // If we are dealing with large sizes, or large alignments we do not
   // want to throw away the existing reserved region, so instead we
@@ -297,31 +298,24 @@ std::pair<void*, size_t> RegionManager::Alloc(size_t request_size,
     // Align on kMinSystemAlloc boundaries to reduce external fragmentation for
     // future allocations.
     size_t size = RoundUp(request_size, kMinSystemAlloc);
-    if (size < request_size) return {nullptr, 0};
+    if (size < request_size) return {-1, nullptr, 0};
     alignment = std::max(alignment, preferred_alignment);
     AnonymousFile file = CreateAnonFile(size, alignment, tag);
-    if (!file.ptr) return {nullptr, 0};
+    if (!file.ptr) return {-1, nullptr, 0};
 
     const auto region_type = TagToHint(tag);
     AddressRegion* region = region_factory->Create(file, size, region_type);
     if (!region) {
       munmap(ptr, size);
       close(file.fd);
-      return {nullptr, 0};
+      return {-1, nullptr, 0};
     }
-    std::pair<void*, size_t> result = region->Alloc(size, alignment);
-    if (result.first != nullptr) {
-      ASSERT(result.first == ptr);
-      ASSERT(result.second == size);
-    } else {
-      ASSERT(result.second == 0);
-    }
-    return result;
+    return region->Alloc(size, alignment);
   }
   return Allocate(request_size, alignment, tag);
 }
 
-std::pair<void*, size_t> RegionManager::Allocate(size_t size, size_t alignment,
+std::tuple<int, void*, size_t> RegionManager::Allocate(size_t size, size_t alignment,
                                                  const MemoryTag tag) {
   AddressRegion*& region = *[&]() {
     switch (tag) {
@@ -341,21 +335,21 @@ std::pair<void*, size_t> RegionManager::Allocate(size_t size, size_t alignment,
   // For sizes that fit in our reserved range first of all check if we can
   // satisfy the request from what we have available.
   if (region) {
-    std::pair<void*, size_t> result = region->Alloc(size, alignment);
-    if (result.first) return result;
+    std::tuple<int, void*, size_t> result = region->Alloc(size, alignment);
+    if (std::get<void*>(result)) return result;
   }
 
   // Allocation failed so we need to reserve more memory.
   // Reserve new region and try allocation again.
   AnonymousFile file = CreateAnonFile(kMinMmapAlloc, kMinMmapAlloc, tag);
-  if (!file.ptr) return {nullptr, 0};
+  if (!file.ptr) return {-1, nullptr, 0};
 
   const auto region_type = TagToHint(tag);
   region = region_factory->Create(file, kMinMmapAlloc, region_type);
   if (!region) {
     munmap(ptr, kMinMmapAlloc);
     close(file.fd);
-    return {nullptr, 0};
+    return {-1, nullptr, 0};
   }
   return region->Alloc(size, alignment);
 }
@@ -421,14 +415,14 @@ AddressRange SystemAlloc(size_t bytes, size_t alignment, const MemoryTag tag) {
 
   InitSystemAllocatorIfNecessary();
 
-  auto [result, actual_bytes] = region_manager->Alloc(bytes, alignment, tag);
+  auto [fd, result, actual_bytes] = region_manager->Alloc(bytes, alignment, tag);
 
   if (result != nullptr) {
     CheckAddressBits<kAddressBits>(reinterpret_cast<uintptr_t>(result) +
                                    actual_bytes - 1);
     ASSERT(GetMemoryTag(result) == tag);
   }
-  return {result, actual_bytes};
+  return {fd, result, actual_bytes};
 }
 
 static bool ReleasePages(void* start, size_t length) {

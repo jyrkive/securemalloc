@@ -30,6 +30,7 @@ namespace tcmalloc {
 namespace tcmalloc_internal {
 
 struct AddressRange {
+  int fd;
   void* ptr;
   size_t bytes;
 };

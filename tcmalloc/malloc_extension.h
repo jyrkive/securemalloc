@@ -31,6 +31,7 @@
 #include <new>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <utility>
 
 #include "absl/base/attributes.h"
@@ -240,12 +241,13 @@ class AddressRegion {
   virtual ~AddressRegion();
 
   // Allocates at least size bytes of memory from this region, aligned with
-  // alignment.  Returns a pair containing a pointer to the start the allocated
-  // memory and the actual size allocated.  Returns {nullptr, 0} on failure.
+  // alignment.  Returns a tuple containing the file descriptor backing the
+  // region, a pointer to the start the allocated memory and the actual size
+  // allocated.  Returns {nullptr, 0} on failure.
   //
   // Alloc must return memory located within the address range given in the call
   // to AddressRegionFactory::Create that created this AddressRegion.
-  virtual std::pair<void*, size_t> Alloc(size_t size, size_t alignment) = 0;
+  virtual std::tuple<int, void*, size_t> Alloc(size_t size, size_t alignment) = 0;
 
   // Returns the file descriptor backing this region.
   virtual int GetFileDescriptor() = 0;

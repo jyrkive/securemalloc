@@ -27,7 +27,6 @@
 #include "tcmalloc/cpu_cache.h"
 #include "tcmalloc/experiment.h"
 #include "tcmalloc/experiment_config.h"
-#include "tcmalloc/huge_page_aware_allocator.h"
 #include "tcmalloc/internal/allocation_guard.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/environment.h"
@@ -41,16 +40,9 @@ GOOGLE_MALLOC_SECTION_BEGIN
 namespace tcmalloc {
 namespace tcmalloc_internal {
 
-// As decide_subrelease() is determined at runtime, we cannot require constant
-// initialization for the atomic.  This avoids an initialization order fiasco.
 static std::atomic<bool>& hpaa_subrelease_ptr() {
   ABSL_CONST_INIT static absl::once_flag flag;
   ABSL_CONST_INIT static std::atomic<bool> v{false};
-  absl::base_internal::LowLevelCallOnce(&flag, [&]() {
-    v.store(huge_page_allocator_internal::decide_subrelease(),
-            std::memory_order_relaxed);
-  });
-
   return v;
 }
 // As background_process_actions_enabled_ptr() are determined at runtime, we

@@ -21,7 +21,6 @@
 #include "absl/base/call_once.h"
 #include "absl/base/optimization.h"
 #include "tcmalloc/common.h"
-#include "tcmalloc/huge_page_aware_allocator.h"
 #include "tcmalloc/internal/config.h"
 #include "tcmalloc/internal/environment.h"
 #include "tcmalloc/internal/logging.h"
@@ -35,54 +34,7 @@ GOOGLE_MALLOC_SECTION_BEGIN
 namespace tcmalloc {
 namespace tcmalloc_internal {
 
-using huge_page_allocator_internal::HugePageAwareAllocatorOptions;
-
 int ABSL_ATTRIBUTE_WEAK default_want_hpaa();
-
-bool decide_want_hpaa() {
-  static_assert(kHugePageSize <= kMinSystemAlloc,
-                "HPAA requires kMinSystemAlloc is at least a hugepage.");
-
-  if (huge_page_allocator_internal::kUnconditionalHPAA) {
-    return true;
-  }
-
-  const char* e =
-      tcmalloc::tcmalloc_internal::thread_safe_getenv("TCMALLOC_HPAA_CONTROL");
-  if (e) {
-    switch (e[0]) {
-      case '0':
-        if (default_want_hpaa != nullptr) {
-          int default_hpaa = default_want_hpaa();
-          if (default_hpaa < 0) {
-            return false;
-          }
-        }
-
-        Log(kLog, __FILE__, __LINE__,
-            "Runtime opt-out from HPAA requires building with "
-            "//tcmalloc:want_no_hpaa."
-        );
-        break;
-      case '1':
-        return true;
-      case '2':
-        return true;
-      default:
-        Crash(kCrash, __FILE__, __LINE__, "bad env var", e);
-        return false;
-    }
-  }
-
-  if (default_want_hpaa != nullptr) {
-    int default_hpaa = default_want_hpaa();
-    if (default_hpaa != 0) {
-      return default_hpaa > 0;
-    }
-  }
-
-  return true;
-}
 
 bool want_hpaa() {
   return false;
@@ -91,25 +43,7 @@ bool want_hpaa() {
 PageAllocator::PageAllocator() {
   const bool kUseHPAA = want_hpaa();
   has_cold_impl_ = ColdFeatureActive();
-  if (kUseHPAA) {
-    normal_impl_[0] = new (&choices_[0].hpaa) HugePageAwareAllocator(
-        HugePageAwareAllocatorOptions{MemoryTag::kNormal});
-    if (tc_globals.numa_topology().numa_aware()) {
-      normal_impl_[1] = new (&choices_[1].hpaa) HugePageAwareAllocator(
-          HugePageAwareAllocatorOptions{MemoryTag::kNormalP1});
-    }
-    sampled_impl_ =
-        new (&choices_[kNumaPartitions + 0].hpaa) HugePageAwareAllocator(
-            HugePageAwareAllocatorOptions{MemoryTag::kSampled});
-    if (has_cold_impl_) {
-      cold_impl_ =
-          new (&choices_[kNumaPartitions + 1].hpaa) HugePageAwareAllocator(
-              HugePageAwareAllocatorOptions{MemoryTag::kCold});
-    } else {
-      cold_impl_ = normal_impl_[0];
-    }
-    alg_ = HPAA;
-  } else {
+  {
     normal_impl_[0] = new (&choices_[0].ph) PageHeap(MemoryTag::kNormal);
     if (tc_globals.numa_topology().numa_aware()) {
       normal_impl_[1] = new (&choices_[1].ph) PageHeap(MemoryTag::kNormalP1);

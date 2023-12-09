@@ -34,10 +34,10 @@ namespace {
 VirtualPageAllocator::VirtualPageAllocator() :
   page_bufferused_(static_cast<std::uint64_t>(num_buffer_slots) << 32) {
   pages_ = mmap(nullptr, static_cast<size_t>(64) << 30, PROT_NONE,
-    MAP_SHARED | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
   free_page_buffer_ = mmap(nullptr,
     num_buffer_slots * sizeof(std::atomic<std::uint32_t>), PROT_READ | PROT_WRITE,
-    MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
   for (std::uint32_t i = 0; i < num_buffer_slots; ++i) {
     new (free_page_buffer_ + i) std::atomic<std::uint32_t>(i);

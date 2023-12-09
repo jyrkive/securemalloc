@@ -14,6 +14,8 @@
 
 #include "tcmalloc/system-alloc.h"
 
+#define _GNU_SOURCE
+
 #include <asm/unistd.h>
 #include <errno.h>
 #include <stddef.h>
@@ -87,6 +89,11 @@ namespace tcmalloc {
 namespace tcmalloc_internal {
 namespace {
 
+struct AnonymousFile {
+  int fd = 0;
+  void* ptr = nullptr;
+}
+
 // Check that no bit is set at position ADDRESS_BITS or higher.
 template <int ADDRESS_BITS>
 void CheckAddressBits(uintptr_t ptr) {
@@ -117,7 +124,7 @@ ABSL_CONST_INIT absl::base_internal::SpinLock spinlock(
 ABSL_CONST_INIT size_t preferred_alignment ABSL_GUARDED_BY(spinlock) = 0;
 
 // The current region factory.
-ABSL_CONST_INIT AddressRegionFactory* region_factory ABSL_GUARDED_BY(spinlock) =
+ABSL_CONST_INIT MmapRegionFactory* region_factory ABSL_GUARDED_BY(spinlock) =
     nullptr;
 
 // Rounds size down to a multiple of alignment.
@@ -134,21 +141,23 @@ size_t RoundUp(const size_t size, const size_t alignment) {
 
 class MmapRegion final : public AddressRegion {
  public:
-  MmapRegion(uintptr_t start, size_t size, AddressRegionFactory::UsageHint hint)
-      : start_(start), free_size_(size), hint_(hint) {}
+  MmapRegion(uintptr_t start, size_t size, AddressRegionFactory::UsageHint hint, int fd)
+      : start_(start), free_size_(size), hint_(hint), fd_(fd) {}
   std::pair<void*, size_t> Alloc(size_t size, size_t alignment) override
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(spinlock);
   ~MmapRegion() override = default;
+  int GetFileDescriptor() override {return fd_;}
 
  private:
   const uintptr_t start_;
   size_t free_size_;
   const AddressRegionFactory::UsageHint hint_;
+  int fd_;
 };
 
 class MmapRegionFactory final : public AddressRegionFactory {
  public:
-  AddressRegion* Create(void* start, size_t size, UsageHint hint) override;
+  AddressRegion* Create(AnonymousFile file, size_t size, UsageHint hint);
   size_t GetStats(absl::Span<char> buffer) override;
   size_t GetStatsInPbtxt(absl::Span<char> buffer) override;
   ~MmapRegionFactory() override = default;
@@ -227,13 +236,13 @@ std::pair<void*, size_t> MmapRegion::Alloc(size_t request_size,
   return {result_ptr, actual_size};
 }
 
-AddressRegion* MmapRegionFactory::Create(void* start, size_t size,
+AddressRegion* MmapRegionFactory::Create(AnonymousFile file, size_t size,
                                          UsageHint hint) {
   void* region_space = MallocInternal(sizeof(MmapRegion));
   if (!region_space) return nullptr;
   bytes_reserved_.fetch_add(size, std::memory_order_relaxed);
   return new (region_space)
-      MmapRegion(reinterpret_cast<uintptr_t>(start), size, hint);
+      MmapRegion(reinterpret_cast<uintptr_t>(file.ptr), size, hint, file.fd);
 }
 
 size_t MmapRegionFactory::GetStats(absl::Span<char> buffer) {
@@ -290,13 +299,14 @@ std::pair<void*, size_t> RegionManager::Alloc(size_t request_size,
     size_t size = RoundUp(request_size, kMinSystemAlloc);
     if (size < request_size) return {nullptr, 0};
     alignment = std::max(alignment, preferred_alignment);
-    void* ptr = MmapAligned(size, alignment, tag);
-    if (!ptr) return {nullptr, 0};
+    AnonymousFile file = CreateAnonFile(size, alignment, tag);
+    if (!file.ptr) return {nullptr, 0};
 
     const auto region_type = TagToHint(tag);
-    AddressRegion* region = region_factory->Create(ptr, size, region_type);
+    AddressRegion* region = region_factory->Create(file, size, region_type);
     if (!region) {
       munmap(ptr, size);
+      close(file.fd);
       return {nullptr, 0};
     }
     std::pair<void*, size_t> result = region->Alloc(size, alignment);
@@ -337,13 +347,14 @@ std::pair<void*, size_t> RegionManager::Allocate(size_t size, size_t alignment,
 
   // Allocation failed so we need to reserve more memory.
   // Reserve new region and try allocation again.
-  void* ptr = MmapAligned(kMinMmapAlloc, kMinMmapAlloc, tag);
-  if (!ptr) return {nullptr, 0};
+  AnonymousFile file = CreateAnonFile(kMinMmapAlloc, kMinMmapAlloc, tag);
+  if (!file.ptr) return {nullptr, 0};
 
   const auto region_type = TagToHint(tag);
-  region = region_factory->Create(ptr, kMinMmapAlloc, region_type);
+  region = region_factory->Create(file, kMinMmapAlloc, region_type);
   if (!region) {
     munmap(ptr, kMinMmapAlloc);
+    close(file.fd);
     return {nullptr, 0};
   }
   return region->Alloc(size, alignment);
@@ -578,7 +589,7 @@ static uintptr_t RandomMmapHint(size_t size, size_t alignment,
   return addr;
 }
 
-void* MmapAligned(size_t size, size_t alignment, const MemoryTag tag) {
+AnonymousFile CreateAnonFile(size_t size, size_t alignment, const MemoryTag tag) {
   ASSERT(size <= kTagMask);
   ASSERT(alignment <= kTagMask);
 
@@ -586,16 +597,13 @@ void* MmapAligned(size_t size, size_t alignment, const MemoryTag tag) {
   static std::array<uintptr_t, kNumaPartitions> next_normal_addr = {0};
   static uintptr_t next_cold_addr = 0;
 
-  std::optional<int> numa_partition;
   uintptr_t& next_addr = *[&]() {
     switch (tag) {
       case MemoryTag::kSampled:
         return &next_sampled_addr;
       case MemoryTag::kNormalP0:
-        numa_partition = 0;
         return &next_normal_addr[0];
       case MemoryTag::kNormalP1:
-        numa_partition = 1;
         return &next_normal_addr[1];
       case MemoryTag::kCold:
         return &next_cold_addr;
@@ -611,46 +619,38 @@ void* MmapAligned(size_t size, size_t alignment, const MemoryTag tag) {
     next_addr = RandomMmapHint(size, alignment, tag);
   }
   void* hint;
+
+  AnonymousFile file;
+  char name[256];
+  absl::SNPrintF(name, sizeof(name), "securemalloc_region_%s",
+    MemoryTagToLabel(tag));
+  file.fd = memfd_create(name, MFD_CLOEXEC);
+  int truncate_returnval = ftruncate(fd, size);
+  if (truncate_returnval != 0) {
+    close(file.fd);
+    return file;
+  }
+
   for (int i = 0; i < 1000; ++i) {
     hint = reinterpret_cast<void*>(next_addr);
     ASSERT(GetMemoryTag(hint) == tag);
-    // TODO(b/140190055): Use MAP_FIXED_NOREPLACE once available.
-    void* result =
-        mmap(hint, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (result == hint) {
-      if (numa_partition.has_value()) {
-        BindMemory(result, size, *numa_partition);
-      }
+    file.ptr = mmap(hint, size, PROT_NONE, MAP_SHARED, file.fd, 0);
+    if (file.ptr == hint) {
       // Attempt to keep the next mmap contiguous in the common case.
       next_addr += size;
       CHECK_CONDITION(kAddressBits == std::numeric_limits<uintptr_t>::digits ||
                       next_addr <= uintptr_t{1} << kAddressBits);
 
-      ASSERT((reinterpret_cast<uintptr_t>(result) & (alignment - 1)) == 0);
-      // Give the mmaped region a name based on its tag.
-#ifdef __linux__
-      // Make a best-effort attempt to name the allocated region based on its
-      // tag.
-      //
-      // The call to prctl() may fail if the kernel was not configured with the
-      // CONFIG_ANON_VMA_NAME kernel option.  This is OK since the call is
-      // primarily a debugging aid.
-      char name[256];
-      absl::SNPrintF(name, sizeof(name), "tcmalloc_region_%s",
-                     MemoryTagToLabel(tag));
-      // Save the existing errno and restore it after the prctl system call.
-      // Since PR_SET_VMA is a best effort call, we don't want it to overwrite
-      // the existing errno value.
-      ErrnoRestorer errno_restorer;
-      prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, result, size, name);
-#endif  // __linux__
-      return result;
+      ASSERT((reinterpret_cast<uintptr_t>(file.ptr) & (alignment - 1)) == 0);
+      return file;
     }
-    if (result == MAP_FAILED) {
+    if (file.ptr == MAP_FAILED) {
       Log(kLogWithStack, __FILE__, __LINE__,
           "mmap() reservation failed (hint, size, error)", hint, size,
           strerror(errno));
-      return nullptr;
+      close(file.fd);
+      file.ptr = nullptr;
+      return file;
     }
     if (int err = munmap(result, size)) {
       Log(kLogWithStack, __FILE__, __LINE__, "munmap() failed (error)",
@@ -660,11 +660,9 @@ void* MmapAligned(size_t size, size_t alignment, const MemoryTag tag) {
     next_addr = RandomMmapHint(size, alignment, tag);
   }
 
-  Log(kLogWithStack, __FILE__, __LINE__,
-      "MmapAligned() failed - unable to allocate with tag (hint, size, "
-      "alignment) - is something limiting address placement?",
-      hint, size, alignment);
-  return nullptr;
+  close(file.fd);
+  file.ptr = nullptr;
+  return file;
 }
 
 }  // namespace tcmalloc_internal

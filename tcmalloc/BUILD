@@ -404,104 +404,6 @@ cc_library(
     alwayslink = 1,
 )
 
-# TCMalloc with large pages is usually faster but fragmentation is higher.  See
-# https://github.com/google/tcmalloc/tree/master/docs/tuning.md for more details.
-cc_library(
-    name = "tcmalloc_large_pages",
-    srcs = [
-        "libc_override.h",
-        "tcmalloc.cc",
-        "tcmalloc.h",
-    ],
-    copts = ["-DTCMALLOC_LARGE_PAGES"] + TCMALLOC_DEFAULT_COPTS,
-    linkstatic = 1,
-    visibility = ["//visibility:public"],
-    deps = tcmalloc_deps + [
-        ":common_large_pages",
-        "//tcmalloc/internal:allocation_guard",
-        "//tcmalloc/internal:overflow",
-        "//tcmalloc/internal:page_size",
-        "@com_google_absl//absl/time",
-        "@com_google_absl//absl/types:span",
-    ],
-    alwayslink = 1,
-)
-
-# TCMalloc with 256k pages is usually faster but fragmentation is higher.  See
-# https://github.com/google/tcmalloc/tree/master/docs/tuning.md for more details.
-cc_library(
-    name = "tcmalloc_256k_pages",
-    srcs = [
-        "libc_override.h",
-        "tcmalloc.cc",
-        "tcmalloc.h",
-    ],
-    copts = ["-DTCMALLOC_256K_PAGES"] + TCMALLOC_DEFAULT_COPTS,
-    linkstatic = 1,
-    visibility = ["//visibility:public"],
-    deps = tcmalloc_deps + [
-        ":common_256k_pages",
-        "//tcmalloc/internal:allocation_guard",
-        "//tcmalloc/internal:overflow",
-        "//tcmalloc/internal:page_size",
-        "@com_google_absl//absl/time",
-        "@com_google_absl//absl/types:span",
-    ],
-    alwayslink = 1,
-)
-
-# TCMalloc small-but-slow is a a version of TCMalloc that chooses to minimize
-# fragmentation at a *severe* cost to performance.  It should be used by
-# applications that have significant memory constraints, but don't need to
-# frequently allocate/free objects.
-#
-# See https://github.com/google/tcmalloc/tree/master/docs/tuning.md for more details.
-cc_library(
-    name = "tcmalloc_small_but_slow",
-    srcs = [
-        "libc_override.h",
-        "tcmalloc.cc",
-        "tcmalloc.h",
-    ],
-    copts = ["-DTCMALLOC_SMALL_BUT_SLOW"] + TCMALLOC_DEFAULT_COPTS,
-    linkstatic = 1,
-    visibility = ["//tcmalloc:__subpackages__"],
-    deps = tcmalloc_deps + [
-        ":common_small_but_slow",
-        "//tcmalloc/internal:allocation_guard",
-        "//tcmalloc/internal:overflow",
-        "//tcmalloc/internal:page_size",
-        "@com_google_absl//absl/time",
-        "@com_google_absl//absl/types:span",
-    ],
-    alwayslink = 1,
-)
-
-# TCMalloc with NUMA awareness compiled in. Note that by default NUMA awareness
-# will still be disabled at runtime - this default can be changed by adding a
-# dependency upon want_numa_aware, or overridden by setting the
-# TCMALLOC_NUMA_AWARE environment variable.
-cc_library(
-    name = "tcmalloc_numa_aware",
-    srcs = [
-        "libc_override.h",
-        "tcmalloc.cc",
-        "tcmalloc.h",
-    ],
-    copts = ["-DTCMALLOC_NUMA_AWARE"] + TCMALLOC_DEFAULT_COPTS,
-    linkstatic = 1,
-    visibility = ["//tcmalloc/testing:__pkg__"],
-    deps = tcmalloc_deps + [
-        ":common_numa_aware",
-        "//tcmalloc/internal:allocation_guard",
-        "//tcmalloc/internal:overflow",
-        "//tcmalloc/internal:page_size",
-        "@com_google_absl//absl/time",
-        "@com_google_absl//absl/types:span",
-    ],
-    alwayslink = 1,
-)
-
 # Export some header files to //tcmalloc/testing/...
 package_group(
     name = "tcmalloc_tests",
@@ -548,24 +450,6 @@ cc_library(
         "//tcmalloc/internal:config",
         "//tcmalloc/internal:logging",
         "@com_google_absl//absl/base:core_headers",
-    ],
-)
-
-cc_library(
-    name = "page_allocator_test_util",
-    testonly = 1,
-    srcs = [
-        "page_allocator_test_util.h",
-    ],
-    hdrs = ["page_allocator_test_util.h"],
-    copts = TCMALLOC_DEFAULT_COPTS,
-    visibility = [":tcmalloc_tests"],
-    deps = [
-        ":common_8k_pages",
-        ":malloc_extension",
-        "//tcmalloc/internal:config",
-        "//tcmalloc/internal:logging",
-        "@com_google_absl//absl/types:span",
     ],
 )
 
@@ -807,38 +691,6 @@ cc_test(
 )
 
 cc_test(
-    name = "huge_page_aware_allocator_test",
-    srcs = ["huge_page_aware_allocator_test.cc"],
-    copts = TCMALLOC_DEFAULT_COPTS,
-    linkstatic = 1,
-    malloc = "//tcmalloc",
-    deps = [
-        ":common_8k_pages",
-        ":malloc_extension",
-        ":page_allocator_test_util",
-        "//tcmalloc/internal:config",
-        "//tcmalloc/internal:logging",
-        "//tcmalloc/internal:page_size",
-        "//tcmalloc/testing:thread_manager",
-        "@com_github_google_benchmark//:benchmark",
-        "@com_google_absl//absl/base",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/container:flat_hash_map",
-        "@com_google_absl//absl/flags:flag",
-        "@com_google_absl//absl/meta:type_traits",
-        "@com_google_absl//absl/random",
-        "@com_google_absl//absl/random:bit_gen_ref",
-        "@com_google_absl//absl/random:distributions",
-        "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/strings:str_format",
-        "@com_google_absl//absl/synchronization",
-        "@com_google_absl//absl/time",
-        "@com_google_absl//absl/types:span",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
-cc_test(
     name = "huge_region_test",
     srcs = ["huge_region_test.cc"],
     copts = TCMALLOC_DEFAULT_COPTS,
@@ -957,22 +809,6 @@ cc_library(
     deps = [
         ":metadata_allocator",
         "@com_google_absl//absl/base:core_headers",
-    ],
-)
-
-cc_test(
-    name = "page_allocator_test",
-    srcs = ["page_allocator_test.cc"],
-    copts = TCMALLOC_DEFAULT_COPTS,
-    linkstatic = 1,
-    deps = [
-        ":common_8k_pages",
-        ":malloc_extension",
-        ":page_allocator_test_util",
-        "//tcmalloc/internal:config",
-        "//tcmalloc/internal:logging",
-        "@com_google_absl//absl/base",
-        "@com_google_googletest//:gtest_main",
     ],
 )
 

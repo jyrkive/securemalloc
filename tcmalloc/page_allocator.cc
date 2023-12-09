@@ -85,13 +85,7 @@ bool decide_want_hpaa() {
 }
 
 bool want_hpaa() {
-  ABSL_CONST_INIT static bool use;
-  ABSL_CONST_INIT static absl::once_flag flag;
-
-  absl::base_internal::LowLevelCallOnce(&flag,
-                                        []() { use = decide_want_hpaa(); });
-
-  return use;
+  return false;
 }
 
 PageAllocator::PageAllocator() {
@@ -116,7 +110,6 @@ PageAllocator::PageAllocator() {
     }
     alg_ = HPAA;
   } else {
-#if defined(TCMALLOC_SMALL_BUT_SLOW) || defined(TCMALLOC_LARGE_PAGES)
     normal_impl_[0] = new (&choices_[0].ph) PageHeap(MemoryTag::kNormal);
     if (tc_globals.numa_topology().numa_aware()) {
       normal_impl_[1] = new (&choices_[1].ph) PageHeap(MemoryTag::kNormalP1);
@@ -130,10 +123,6 @@ PageAllocator::PageAllocator() {
       cold_impl_ = normal_impl_[0];
     }
     alg_ = PAGE_HEAP;
-#else
-    static_assert(huge_page_allocator_internal::kUnconditionalHPAA);
-    CHECK_CONDITION(false && "unreachable");
-#endif
   }
 }
 

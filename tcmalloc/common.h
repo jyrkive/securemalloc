@@ -41,76 +41,10 @@ namespace tcmalloc_internal {
 
 static_assert(sizeof(void*) == 8);
 
-//-------------------------------------------------------------------
-// Configuration
-//-------------------------------------------------------------------
-
-// There are four different models for tcmalloc which are created by defining a
-// set of constant variables differently:
-//
-// DEFAULT:
-//   The default configuration strives for good performance while trying to
-//   minimize fragmentation.  It uses a smaller page size to reduce
-//   fragmentation, but allocates per-thread and per-cpu capacities similar to
-//   TCMALLOC_LARGE_PAGES / TCMALLOC_256K_PAGES.
-//
-// TCMALLOC_LARGE_PAGES:
-//   Larger page sizes increase the bookkeeping granularity used by TCMalloc for
-//   its allocations.  This can reduce PageMap size and traffic to the
-//   innermost cache (the page heap), but can increase memory footprints.  As
-//   TCMalloc will not reuse a page for a different allocation size until the
-//   entire page is deallocated, this can be a source of increased memory
-//   fragmentation.
-//
-//   Historically, larger page sizes improved lookup performance for the
-//   pointer-to-size lookup in the PageMap that was part of the critical path.
-//   With most deallocations leveraging C++14's sized delete feature
-//   (https://isocpp.org/files/papers/n3778.html), this optimization is less
-//   significant.
-//
-// TCMALLOC_256K_PAGES
-//   This configuration uses an even larger page size (256KB) as the unit of
-//   accounting granularity.
-//
-// TCMALLOC_SMALL_BUT_SLOW:
-//   Used for situations where minimizing the memory footprint is the most
-//   desirable attribute, even at the cost of performance.
-//
-// The constants that vary between models are:
-//
-//   kPageShift - Shift amount used to compute the page size.
-//   kNumBaseClasses - Number of size classes serviced by bucket allocators
-//   kMaxSize - Maximum size serviced by bucket allocators (thread/cpu/central)
-//   kMinThreadCacheSize - The minimum size in bytes of each ThreadCache.
-//   kMaxThreadCacheSize - The maximum size in bytes of each ThreadCache.
-//   kDefaultOverallThreadCacheSize - The maximum combined size in bytes of all
-//     ThreadCaches for an executable.
-//   kStealAmount - The number of bytes one ThreadCache will steal from another
-//     when the first ThreadCache is forced to Scavenge(), delaying the next
-//     call to Scavenge for this thread.
-
-// Older configurations had their own customized macros.  Convert them into
-// a page-shift parameter that is checked below.
-
 #ifndef TCMALLOC_PAGE_SHIFT
-#ifdef TCMALLOC_SMALL_BUT_SLOW
-#define TCMALLOC_PAGE_SHIFT 12
-#define TCMALLOC_USE_PAGEMAP3
-#elif defined(TCMALLOC_256K_PAGES)
-#define TCMALLOC_PAGE_SHIFT 18
-#elif defined(TCMALLOC_LARGE_PAGES)
 #define TCMALLOC_PAGE_SHIFT 15
 #else
-#define TCMALLOC_PAGE_SHIFT 13
-#endif
-#else
 #error "TCMALLOC_PAGE_SHIFT is an internal macro!"
-#endif
-
-#if defined(TCMALLOC_SMALL_BUT_SLOW) + defined(TCMALLOC_256K_PAGES) + \
-        defined(TCMALLOC_LARGE_PAGES) >                               \
-    1
-#error "At most 1 variant configuration must be used."
 #endif
 
 #if TCMALLOC_PAGE_SHIFT == 12

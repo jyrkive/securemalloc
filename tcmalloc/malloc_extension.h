@@ -246,6 +246,9 @@ class AddressRegion {
   // Alloc must return memory located within the address range given in the call
   // to AddressRegionFactory::Create that created this AddressRegion.
   virtual std::pair<void*, size_t> Alloc(size_t size, size_t alignment) = 0;
+
+  // Returns the file descriptor backing this region.
+  virtual int GetFileDescriptor() = 0;
 };
 
 // Interface to a pluggable address region allocator.
@@ -262,18 +265,6 @@ class AddressRegionFactory {
 
   AddressRegionFactory() {}
   virtual ~AddressRegionFactory();
-
-  // Returns an AddressRegion with the specified start address and size.  hint
-  // indicates how the caller intends to use the returned region (helpful for
-  // deciding which regions to remap with hugepages, which regions should have
-  // pages prefaulted, etc.).  The returned AddressRegion must never be deleted.
-  //
-  // The caller must have reserved size bytes of address space starting at
-  // start_addr with mmap(PROT_NONE) prior to calling this function (so it is
-  // safe for Create() to mmap(MAP_FIXED) over the specified address range).
-  // start_addr and size are always page-aligned.
-  virtual AddressRegion* Create(void* start_addr, size_t size,
-                                UsageHint hint) = 0;
 
   // Gets a human-readable description of the current state of the allocator.
   //

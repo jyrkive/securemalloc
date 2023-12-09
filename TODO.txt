@@ -1,5 +1,3 @@
-* change the physical page allocator to use anonymous files as the backing store, see
-  https://manned.org/memfd_create.2
 * when malloc() and friends are called with an allocation of 4 kB or less, grab a page
   from the virtual page allocator, alias it with the page storing the real underlying
   allocation using the technique described in https://stackoverflow.com/a/67781757 and

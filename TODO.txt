@@ -2,6 +2,8 @@
   from the virtual page allocator, alias it with the page storing the real underlying
   allocation using the technique described in https://stackoverflow.com/a/67781757 and
   return the address in the virtual page instead of the original page
+  - look into tcmalloc.cc functions fast_alloc, FreeSmall and (if sampling is needed)
+    free_sampled
 * consider removing said alias when free() is called (and when realloc() needs to
   switch to a different physical page)
 * how slow is generating the free list on init? If necessary, consider generating it

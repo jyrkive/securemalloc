@@ -79,9 +79,6 @@ char* VirtualPageAllocator::Allocate() {
 
   char* page = pages_ + page_index * page_size;
 
-  // Mark the page as accessible.
-  mprotect(page, page_size, PROT_READ | PROT_WRITE);
-
   // Return it.
   return page;
 }

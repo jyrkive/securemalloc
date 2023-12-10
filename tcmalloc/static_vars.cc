@@ -93,6 +93,7 @@ ABSL_CONST_INIT PageHeapAllocator<StackTraceTable::LinkedSample>
 ABSL_CONST_INIT std::atomic<bool> Static::inited_{false};
 ABSL_CONST_INIT std::atomic<bool> Static::cpu_cache_active_{false};
 ABSL_CONST_INIT Static::PageAllocatorStorage Static::page_allocator_;
+ABSL_CONST_INIT Static::VirtualPageAllocatorStorage Static::virtual_page_allocator_;
 ABSL_CONST_INIT PageMap Static::pagemap_;
 ABSL_CONST_INIT GuardedPageAllocator Static::guardedpage_allocator_;
 ABSL_CONST_INIT StackTraceFilter Static::stacktrace_filter_;
@@ -118,12 +119,13 @@ size_t Static::metadata_bytes() {
       sizeof(span_allocator_) + +sizeof(threadcache_allocator_) +
       sizeof(sampled_allocation_recorder_) + sizeof(linked_sample_allocator_) +
       sizeof(inited_) + sizeof(cpu_cache_active_) + sizeof(page_allocator_) +
-      sizeof(pagemap_) + sizeof(sampled_objects_size_) +
-      sizeof(sampled_internal_fragmentation_) + sizeof(total_sampled_count_) +
-      sizeof(allocation_samples) + sizeof(deallocation_samples) +
-      sizeof(sampled_alloc_handle_generator) + sizeof(peak_heap_tracker_) +
-      sizeof(guardedpage_allocator_) + sizeof(stacktrace_filter_) +
-      sizeof(numa_topology_) + sizeof(CacheTopology::Instance());
+      sizeof(virtual_page_allocator_) + sizeof(pagemap_) +
+      sizeof(sampled_objects_size_) + sizeof(sampled_internal_fragmentation_) +
+      sizeof(total_sampled_count_) + sizeof(allocation_samples) +
+      sizeof(deallocation_samples) + sizeof(sampled_alloc_handle_generator) +
+      sizeof(peak_heap_tracker_) + sizeof(guardedpage_allocator_) +
+      sizeof(stacktrace_filter_) + sizeof(numa_topology_) +
+      sizeof(CacheTopology::Instance());
   // LINT.ThenChange(:static_vars)
 
   const size_t allocated = arena().stats().bytes_allocated +
@@ -180,6 +182,7 @@ ABSL_ATTRIBUTE_COLD ABSL_ATTRIBUTE_NOINLINE void Static::SlowInitIfNecessary() {
     // state.
     sharded_transfer_cache_.Init();
     new (page_allocator_.memory) PageAllocator;
+    new (virtual_page_allocator_.memory) VirtualPageAllocator;
     threadcache_allocator_.Init(&arena_);
     pagemap_.MapRootWithSmallPages();
     guardedpage_allocator_.Init(/*max_alloced_pages=*/64, /*total_pages=*/128);

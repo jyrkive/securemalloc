@@ -50,6 +50,7 @@
 #include "tcmalloc/span.h"
 #include "tcmalloc/stack_trace_table.h"
 #include "tcmalloc/transfer_cache.h"
+#include "tcmalloc/virtual_page_allocator.h"
 
 GOOGLE_MALLOC_SECTION_BEGIN
 namespace tcmalloc {
@@ -105,6 +106,10 @@ class Static final {
   // Page-level allocator.
   static PageAllocator& page_allocator() {
     return *reinterpret_cast<PageAllocator*>(page_allocator_.memory);
+  }
+
+  static VirtualPageAllocator& virtual_page_allocator() {
+    return *reinterpret_cast<VirtualPageAllocator*>(virtual_page_allocator_.memory);
   }
 
   static PageMap& pagemap() { return pagemap_; }
@@ -213,7 +218,15 @@ class Static final {
     uintptr_t extra;  // To force alignment
   };
 
+  union VirtualPageAllocatorStorage {
+    constexpr VirtualPageAllocatorStorage() : extra(0) {}
+
+    char memory[sizeof(VirtualPageAllocator)];
+    std::atomic<uint64_t> extra;
+  };
+
   static PageAllocatorStorage page_allocator_;
+  static VirtualPageAllocatorStorage virtual_page_allocator_;
   static PageMap pagemap_;
 
   // Manages sampled allocations and allows iteration over samples free from

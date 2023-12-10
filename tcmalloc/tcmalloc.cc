@@ -56,6 +56,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/mman.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -915,6 +916,21 @@ alloc_small_sampled_hooks_or_perthread(size_t size, uint32_t size_class,
   return Policy::as_pointer(ptr.p, ptr.n);
 }
 
+static typename void* try_allocate_dedicated_virtual_page(void* ptr, size_t size) {
+  if (size <= 4096) {
+    PageId source_page = PageIdContaining(ptr);
+    const Span* span = tc_globals.pagemap().GetExistingDescriptor(source_page);
+    char* page = tc_globals.virtual_page_allocator().Allocate();
+    mmap(page, 4096, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+      span->file_descriptor(),
+      span->offset() +
+      (source_page - span->first_page() << kPageShift) +
+      (ptr & 0x7000));
+    ptr = page + (ptr & 0x0FFF);
+  }
+  return ptr;
+}
+
 // Slow path implementation.
 // This function is used by `fast_alloc` if the allocation requires page sized
 // allocations or some complex logic is required such as initialization,
@@ -932,13 +948,15 @@ slow_alloc_small(size_t size, uint32_t size_class, Policy policy) {
   if (ABSL_PREDICT_FALSE(weight != 0) ||
       ABSL_PREDICT_FALSE(tcmalloc::tcmalloc_internal::Static::HaveHooks()) ||
       ABSL_PREDICT_FALSE(!UsePerCpuCache(tc_globals))) {
-    return alloc_small_sampled_hooks_or_perthread(size, size_class, policy,
-                                                  weight);
+    return try_allocate_dedicated_virtual_page(
+      alloc_small_sampled_hooks_or_perthread(size, size_class, policy,
+        weight), size);
   }
 
   void* res = tc_globals.cpu_cache().AllocateSlowNoHooks(size_class);
   if (ABSL_PREDICT_FALSE(res == nullptr)) return policy.handle_oom(size);
-  return Policy::to_pointer(res, size_class);
+  return Policy::to_pointer(try_allocate_dedicated_virtual_page(res, size),
+    size_class);
 }
 
 template <typename Policy>
@@ -989,7 +1007,8 @@ static inline Pointer ABSL_ATTRIBUTE_ALWAYS_INLINE fast_alloc(Policy policy,
   }
 
   ASSERT(ret != nullptr);
-  return Policy::to_pointer(ret, size_class);
+  return Policy::to_pointer(try_allocate_dedicated_virtual_page(ret, size),
+    size_class);
 }
 
 }  // namespace tcmalloc_internal

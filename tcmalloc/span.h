@@ -20,10 +20,12 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/types.h>
 
 #include <atomic>
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 
 #include "absl/base/attributes.h"
 #include "absl/base/optimization.h"
@@ -89,7 +91,7 @@ class Span : public SpanList::Elem {
  public:
   // Allocator/deallocator for spans. Note that these functions are defined
   // in static_vars.h, which is weird: see there for why.
-  static Span* New(int fd, PageId p, Length len)
+  static Span* New(int fd, off_t o, PageId p, Length len)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock);
   static Span* New(const Span* parent, PageId p, Length len)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(pageheap_lock);
@@ -141,6 +143,9 @@ class Span : public SpanList::Elem {
 
   // Returns the file descriptor of the anonymous file backing the span.
   int file_descriptor() const;
+
+  // Returns the offset the start of the span has from the anonymous file.
+  off_t offset() const;
 
   // Returns first page of the span.
   PageId first_page() const;
@@ -236,7 +241,7 @@ class Span : public SpanList::Elem {
   size_t FreelistPopBatch(void** batch, size_t N, size_t size);
 
   // Reset a Span object to track the range [p, p + n).
-  void Init(int fd, PageId p, Length n);
+  void Init(int fd, off_t o, PageId p, Length n);
 
   // Initialize freelist to contain all objects in the span.
   // Pops up to N objects from the freelist and returns them in the batch array.
@@ -320,6 +325,7 @@ class Span : public SpanList::Elem {
   };
 
   int file_descriptor_; // File descriptor.
+  off_t offset_;        // Offset from the file.
   PageId first_page_;   // Starting page number.
   Length num_pages_;    // Number of pages in span.
 
@@ -591,6 +597,8 @@ inline PageId Span::last_page() const {
 
 inline void Span::set_first_page(PageId p) {
   ASSERT(p > PageId{0});
+  offset += static_cast<std::intptr_t>(p.start_uintptr()) -
+    static_cast<std::intptr_t>(first_page_.start_uintptr());
   first_page_ = p;
 }
 
@@ -633,7 +641,7 @@ inline void Span::Prefetch() {
   PrefetchT0(&this->allocated_);
 }
 
-inline void Span::Init(int fd, PageId p, Length n) {
+inline void Span::Init(int fd, off_t o, PageId p, Length n) {
   ASSERT(p > PageId{0});
 #ifndef NDEBUG
   // In debug mode we have additional checking of our list ops; these must be
@@ -641,6 +649,7 @@ inline void Span::Init(int fd, PageId p, Length n) {
   new (this) Span();
 #endif
   file_descriptor_ = fd;
+  offset_ = o;
   first_page_ = p;
   num_pages_ = n;
   location_ = IN_USE;

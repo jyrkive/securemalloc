@@ -458,7 +458,7 @@ bool PageHeap::GrowHeap(Length n) {
   if (ABSL_PREDICT_TRUE(pagemap_->Ensure(p - Length(1), n + Length(2)))) {
     // Pretend the new area is allocated and then return it to cause
     // any necessary coalescing to occur.
-    Span* span = Span::New(fd, p, n);
+    Span* span = Span::New(fd, 0, p, n);
     RecordSpan(span);
     span->set_location(Span::ON_RETURNED_FREELIST);
     MergeIntoFreeList(span);

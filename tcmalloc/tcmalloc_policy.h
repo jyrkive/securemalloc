@@ -127,13 +127,9 @@ struct CppOomPolicy {
   }
 };
 
-// DefaultAlignPolicy: use default small size table based allocation
+// DefaultAlignPolicy: align to 8 bytes
 struct DefaultAlignPolicy {
-  // Important: the value here is explicitly '1' to indicate that the used
-  // alignment is the default alignment of the size tables in tcmalloc.
-  // The constexpr value of 1 will optimize out the alignment checks and
-  // iterations in the GetSizeClass() calls for default aligned allocations.
-  static constexpr size_t align() { return 1; }
+  static constexpr size_t align() { return 8; }
 };
 
 // MallocAlignPolicy: use std::max_align_t allocation

@@ -916,8 +916,15 @@ alloc_small_sampled_hooks_or_perthread(size_t size, uint32_t size_class,
   return Policy::as_pointer(ptr.p, ptr.n);
 }
 
-static typename void* try_allocate_dedicated_virtual_page(void* ptr, size_t size) {
-  if (size <= 4096) {
+template <typename Policy>
+static constexpr size_t start_padding_size(Policy policy) {
+  return std::max(8, policy.align());
+}
+
+template <typename Policy>
+static typename void*
+try_allocate_dedicated_virtual_page(Policy policy, void* ptr, size_t size) {
+  if (size <= 4096 - start_padding_size(policy)) {
     PageId source_page = PageIdContaining(ptr);
     const Span* span = tc_globals.pagemap().GetExistingDescriptor(source_page);
     char* page = tc_globals.virtual_page_allocator().Allocate();
@@ -926,7 +933,12 @@ static typename void* try_allocate_dedicated_virtual_page(void* ptr, size_t size
       span->offset() +
       (source_page - span->first_page() << kPageShift) +
       (ptr & 0x7000));
-    ptr = page + (ptr & 0x0FFF);
+    uintptr_t* page_ptr = page + (ptr & 0x0FFF);
+
+    // Store the originally received address so we have it available when freeing.
+    *page_ptr = ptr;
+
+    ptr = reinterpret_cast<char*>(page_ptr) + start_padding_size(policy);
   }
   return ptr;
 }
@@ -949,13 +961,15 @@ slow_alloc_small(size_t size, uint32_t size_class, Policy policy) {
       ABSL_PREDICT_FALSE(tcmalloc::tcmalloc_internal::Static::HaveHooks()) ||
       ABSL_PREDICT_FALSE(!UsePerCpuCache(tc_globals))) {
     return try_allocate_dedicated_virtual_page(
-      alloc_small_sampled_hooks_or_perthread(size, size_class, policy,
-        weight), size);
+      policy,
+      alloc_small_sampled_hooks_or_perthread(size, size_class, policy, weight),
+      size);
   }
 
   void* res = tc_globals.cpu_cache().AllocateSlowNoHooks(size_class);
   if (ABSL_PREDICT_FALSE(res == nullptr)) return policy.handle_oom(size);
-  return Policy::to_pointer(try_allocate_dedicated_virtual_page(res, size),
+  return Policy::to_pointer(
+    try_allocate_dedicated_virtual_page(policy, res, size),
     size_class);
 }
 
@@ -974,6 +988,10 @@ ABSL_ATTRIBUTE_NOINLINE static typename Policy::pointer_type slow_alloc_large(
 template <typename Policy, typename Pointer = typename Policy::pointer_type>
 static inline Pointer ABSL_ATTRIBUTE_ALWAYS_INLINE fast_alloc(Policy policy,
                                                               size_t size) {
+  if (size < 4096 - start_padding_size(policy)) {
+    size += start_padding_size(policy);
+  }
+
   // If size is larger than kMaxSize, it's not fast-path anymore. In
   // such case, GetSizeClass will return false, and we'll delegate to the slow
   // path. If malloc is not yet initialized, we may end up with size_class == 0
@@ -1007,7 +1025,8 @@ static inline Pointer ABSL_ATTRIBUTE_ALWAYS_INLINE fast_alloc(Policy policy,
   }
 
   ASSERT(ret != nullptr);
-  return Policy::to_pointer(try_allocate_dedicated_virtual_page(ret, size),
+  return Policy::to_pointer(
+    try_allocate_dedicated_virtual_page(policy, ret, size),
     size_class);
 }
 
